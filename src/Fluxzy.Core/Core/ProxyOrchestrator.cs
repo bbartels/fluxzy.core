@@ -517,7 +517,7 @@ namespace Fluxzy.Core
                              exchange.Request.Body.Length > 0))
                         {
                             exchange.Request.Body = new DispatchStream(exchange.Request.Body!,
-                                true,
+                                true, DispatchStreamOwnership.OwnBaseStream,
                                 _archiveWriter.CreateRequestBodyStream(exchange.Id));
                         }
                     }
@@ -692,7 +692,7 @@ namespace Fluxzy.Core
                             }
 
                             var dispatchStream = new DispatchStream(responseBodyStream,
-                                true,
+                                true, DispatchStreamOwnership.OwnBaseStream,
                                 _archiveWriter.CreateResponseBodyStream(exchange.Id));
 
                             var ext = exchange;
@@ -817,6 +817,8 @@ namespace Fluxzy.Core
                     {
                         // Enhance your calm
                     }
+
+                    await exchange.ConnectionDisposition.ConfigureAwait(false);
 
                     FluxzyLogEvents.LogExchangeCompleted(_logger, exchange, _proxyRuntimeSetting.StartupSetting);
                 }

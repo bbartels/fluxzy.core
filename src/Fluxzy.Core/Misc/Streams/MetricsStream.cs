@@ -176,24 +176,21 @@ namespace Fluxzy.Misc.Streams
             _firstBytesRead();
         }
 
-        private void NotifyFinalRead()
+        private void NotifyFinalRead(bool? endConnection = null)
         {
             if (_finalReadNotified)
                 return; 
 
             _finalReadNotified = true;
 
-            _endRead(EndConnection, TotalRead);
+            _endRead(endConnection ?? EndConnection, TotalRead);
         }
 
         protected override void Dispose(bool disposing)
         {
             base.Dispose(disposing);
 
-            if (_expectedLength != null && _expectedLength >= TotalRead)
-            {
-                NotifyFinalRead();
-            }
+            NotifyFinalRead(_expectedLength == null || TotalRead < _expectedLength || EndConnection);
         }
     }
 }

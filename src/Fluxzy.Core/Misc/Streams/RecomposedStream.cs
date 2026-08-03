@@ -33,13 +33,12 @@ namespace Fluxzy.Misc.Streams
 
         public override void Flush()
         {
-            _readStream.Flush();
             _writeStream.Flush();
         }
 
         public override Task FlushAsync(CancellationToken cancellationToken)
         {
-            return Task.WhenAll(_readStream.FlushAsync(cancellationToken), _writeStream.FlushAsync(cancellationToken));
+            return _writeStream.FlushAsync(cancellationToken);
         }
 
         public override int Read(byte[] buffer, int offset, int count)

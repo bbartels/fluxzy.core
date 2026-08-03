@@ -292,6 +292,22 @@ namespace Fluxzy.Clients.H11
             FluxzyLogEvents.LogResponseHeaderReceived(_logger, exchange);
 
             var shouldCloseConnection = exchange.Response.Header.ConnectionCloseRequest;
+            var bodyStream = exchange.Connection.ReadStream!;
+
+            if (headerBlockDetectResult.HeaderLength < headerBlockDetectResult.TotalReadLength) {
+                var length = headerBlockDetectResult.TotalReadLength -
+                             headerBlockDetectResult.HeaderLength;
+
+                if (bodyStream is not PushbackReadStream pushbackStream) {
+                    pushbackStream = new PushbackReadStream(
+                        bodyStream, leaveOpen: ReferenceEquals(bodyStream, exchange.Connection.WriteStream));
+                    exchange.Connection.ReadStream = pushbackStream;
+                    bodyStream = pushbackStream;
+                }
+
+                pushbackStream.Push(
+                    buffer.Buffer.AsSpan(headerBlockDetectResult.HeaderLength, length));
+            }
 
             if (!exchange.Response.Header.HasResponseBody(exchange.Request.Header.Method.Span, out var shouldClose)) {
                 // We close the connection because
@@ -316,20 +332,6 @@ namespace Fluxzy.Clients.H11
                 // does not send a content-length header and request a close connection
 
                 exchange.ReadUntilClose = true;
-            }
-
-            var bodyStream = exchange.Connection.ReadStream!;
-
-            if (headerBlockDetectResult.HeaderLength < headerBlockDetectResult.TotalReadLength) {
-                var length = headerBlockDetectResult.TotalReadLength -
-                             headerBlockDetectResult.HeaderLength;
-
-                // Concat the extra body bytes read while retrieving header
-                bodyStream = new CombinedReadonlyStream(
-                    shouldCloseConnection,
-                    buffer.Buffer.AsSpan(headerBlockDetectResult.HeaderLength, length),
-                    exchange.Connection.ReadStream!
-                );
             }
 
             ChunkedTransferReadStream? chunkedReadStream = null;

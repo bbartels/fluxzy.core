@@ -16,15 +16,23 @@ namespace Fluxzy.Misc.Streams
     public class PushbackReadStream : Stream
     {
         private readonly Stream _innerStream;
+        private readonly bool _leaveOpen;
 
         private byte[]? _pushback;
+        private bool _disposed;
         private int _offset;
         private int _length;
         private long _position;
 
         public PushbackReadStream(Stream innerStream)
+            : this(innerStream, true)
+        {
+        }
+
+        public PushbackReadStream(Stream innerStream, bool leaveOpen)
         {
             _innerStream = innerStream;
+            _leaveOpen = leaveOpen;
         }
 
         public int PendingLength => _length - _offset;
@@ -171,14 +179,16 @@ namespace Fluxzy.Misc.Streams
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) {
+            if (disposing && !_disposed) {
+                _disposed = true;
                 _offset = 0;
                 _length = 0;
                 ReturnBuffer();
-            }
 
-            // Inner stream is left open, matching the previous
-            // CombinedReadonlyStream(closeStreams: false) behavior
+                if (!_leaveOpen) {
+                    _innerStream.Dispose();
+                }
+            }
 
             base.Dispose(disposing);
         }
