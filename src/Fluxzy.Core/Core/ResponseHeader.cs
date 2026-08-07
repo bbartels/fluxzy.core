@@ -13,6 +13,8 @@ namespace Fluxzy.Core
 {
     public class ResponseHeader : Header
     {
+        private readonly bool _isHttp10Response;
+
         /// <summary>
         ///     Building from flat header
         /// </summary>
@@ -24,6 +26,7 @@ namespace Fluxzy.Core
             bool isSecure, bool parseConnectionInfo)
             : base(headerContent, isSecure)
         {
+            _isHttp10Response = IsHttp10Response(headerContent.Span);
             StatusCode = ParseStatusCode();
 
             if (parseConnectionInfo) {
@@ -42,6 +45,7 @@ namespace Fluxzy.Core
         public ResponseHeader(IEnumerable<HeaderField> headers)
             : base(headers)
         {
+            _isHttp10Response = false;
             StatusCode = ParseStatusCode();
 
             ConnectionCloseRequest = ReadConnectionCloseRequest();
@@ -60,6 +64,23 @@ namespace Fluxzy.Core
             return int.Parse(field.Value.Span);
         }
 
+        private static bool IsHttp10Response(ReadOnlySpan<char> headerContent)
+        {
+            var lineStart = 0;
+            while (lineStart < headerContent.Length &&
+                   (headerContent[lineStart] == (char) 13 || headerContent[lineStart] == (char) 10)) {
+                lineStart++;
+            }
+
+            const string protocol = "HTTP/1.0";
+            var firstLine = headerContent.Slice(lineStart);
+
+            return firstLine.Length > protocol.Length &&
+                   firstLine.Slice(0, protocol.Length)
+                            .Equals(protocol.AsSpan(), StringComparison.OrdinalIgnoreCase) &&
+                   (firstLine[protocol.Length] == ' ' || firstLine[protocol.Length] == (char) 9);
+        }
+
         public int TimeoutIdleSeconds { get; set; } = -1;
 
         public int MaxConnection { get; set; } = -1;
@@ -71,6 +92,11 @@ namespace Fluxzy.Core
         private bool ReadConnectionCloseRequest()
         {
             if (HasHeaderValueEqualsAny(Http11Constants.ConnectionVerb, "close")) {
+                return true;
+            }
+
+            if (_isHttp10Response &&
+                !HasHeaderValueEqualsAny(Http11Constants.ConnectionVerb, "keep-alive")) {
                 return true;
             }
 
