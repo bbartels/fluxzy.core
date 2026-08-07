@@ -128,6 +128,7 @@ namespace Fluxzy.Tests.UnitTests.Core
 
             var url = $"https://localhost:{origin.Port}/";
             var firstConnection = await GetConnectionId(client, url);
+            await origin.FirstConnectionClosed.WaitAsync(TimeSpan.FromSeconds(2));
             var secondConnection = await GetConnectionId(client, url);
 
             Assert.NotEqual(firstConnection, secondConnection);
@@ -152,6 +153,8 @@ namespace Fluxzy.Tests.UnitTests.Core
             private readonly TcpListener _listener;
             private readonly System.Security.Cryptography.X509Certificates.X509Certificate2 _certificate;
             private readonly CancellationTokenSource _cts = new();
+            private readonly TaskCompletionSource _firstConnectionClosed =
+                new(TaskCreationOptions.RunContinuationsAsynchronously);
             private readonly ConcurrentBag<Task> _connections = new();
             private readonly Task _acceptLoop;
             private int _acceptedConnections;
@@ -168,6 +171,8 @@ namespace Fluxzy.Tests.UnitTests.Core
             public int Port => ((IPEndPoint) _listener.LocalEndpoint).Port;
 
             public int AcceptedConnections => Volatile.Read(ref _acceptedConnections);
+
+            public Task FirstConnectionClosed => _firstConnectionClosed.Task;
 
             public static Http10TlsOrigin Start()
             {
@@ -246,6 +251,11 @@ namespace Fluxzy.Tests.UnitTests.Core
                 }
                 catch (AuthenticationException)
                 {
+                }
+                finally
+                {
+                    if (connectionId == 1)
+                        _firstConnectionClosed.TrySetResult();
                 }
             }
 
