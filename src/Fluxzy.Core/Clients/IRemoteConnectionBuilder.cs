@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Security;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Fluxzy.Clients.Ssl;
@@ -63,6 +64,7 @@ namespace Fluxzy.Clients
 
             DisposeEventNotifierStream? openedStream = null;
             var connectionOpened = false;
+            OperationCanceledException? cancellationException = null;
 
             try {
                 var result = await OpenConnectionToRemoteInternal(
@@ -73,14 +75,8 @@ namespace Fluxzy.Clients
                 connectionOpened = true;
                 return result;
             }
-            catch (OperationCanceledException) {
-                if (token.IsCancellationRequested)
-                    throw;
-
-                throw new ClientErrorException(0,
-                    $"The connection to {exchange.Authority.HostName}:{exchange.Authority.Port} " +
-                    $"could not be established within {connectionTimeout.TotalSeconds:F0} seconds",
-                    networkErrorCode: NetworkErrorCodes.ConnectionTimeout);
+            catch (OperationCanceledException ex) {
+                cancellationException = ex;
             }
             finally {
                 if (!connectionOpened) {
@@ -95,6 +91,14 @@ namespace Fluxzy.Clients
                     }
                 }
             }
+
+            if (token.IsCancellationRequested)
+                ExceptionDispatchInfo.Capture(cancellationException!).Throw();
+
+            throw new ClientErrorException(0,
+                $"The connection to {exchange.Authority.HostName}:{exchange.Authority.Port} " +
+                $"could not be established within {connectionTimeout.TotalSeconds:F0} seconds",
+                networkErrorCode: NetworkErrorCodes.ConnectionTimeout);
         }
 
         private async ValueTask<RemoteConnectionResult> OpenConnectionToRemoteInternal(

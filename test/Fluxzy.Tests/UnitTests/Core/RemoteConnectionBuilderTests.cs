@@ -89,6 +89,67 @@ namespace Fluxzy.Tests.UnitTests.Core
         }
 
         [Fact]
+        public async Task CallerCancellationAfterSslBuilderClosesStreamDisposesOnce()
+        {
+            var cleanupEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseCleanup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var opened = await OpenConnectedStream(async () => {
+                cleanupEntered.TrySetResult();
+                await releaseCleanup.Task;
+            });
+            using var peer = opened.Peer;
+            using var cancellation = new CancellationTokenSource();
+            var expected = new OperationCanceledException("caller cancelled", null, cancellation.Token);
+            var builder = CreateBuilder((stream, _, _, _) => {
+                stream.Close();
+                cancellation.Cancel();
+                return Task.FromException<SslConnection>(expected);
+            });
+            var exchange = CreateExchange();
+
+            var connectionTask = builder.OpenConnectionToRemote(
+                exchange, Resolution(), HttpProtocols, Setting(opened.Stream), null,
+                cancellation.Token).AsTask();
+            await cleanupEntered.Task;
+            releaseCleanup.TrySetResult();
+
+            var actual = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => connectionTask);
+
+            Assert.Same(expected, actual);
+            Assert.Equal(1, opened.DisposeCount());
+            Assert.Null(exchange.Connection);
+        }
+
+        [Fact]
+        public async Task CallerCancellationDuringFailureCleanupPreservesCancellation()
+        {
+            var cleanupEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseCleanup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var opened = await OpenConnectedStream(async () => {
+                cleanupEntered.TrySetResult();
+                await releaseCleanup.Task;
+            });
+            using var peer = opened.Peer;
+            using var cancellation = new CancellationTokenSource();
+            var expected = new OperationCanceledException("connect cancelled");
+            var builder = CreateBuilder((_, _, _, _) => Task.FromException<SslConnection>(expected));
+            var exchange = CreateExchange();
+
+            var connectionTask = builder.OpenConnectionToRemote(
+                exchange, Resolution(), HttpProtocols, Setting(opened.Stream), null,
+                cancellation.Token).AsTask();
+            await cleanupEntered.Task;
+            cancellation.Cancel();
+            releaseCleanup.TrySetResult();
+
+            var actual = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => connectionTask);
+
+            Assert.Same(expected, actual);
+            Assert.Equal(1, opened.DisposeCount());
+            Assert.Null(exchange.Connection);
+        }
+
+        [Fact]
         public async Task ConnectionTimeoutPreservesMappingAndDisposesOpenedStream()
         {
             var opened = await OpenConnectedStream();
@@ -204,7 +265,7 @@ namespace Fluxzy.Tests.UnitTests.Core
         }
 
         private static async Task<(DisposeEventNotifierStream Stream, TcpClient Peer,
-            Func<int> DisposeCount)> OpenConnectedStream()
+            Func<int> DisposeCount)> OpenConnectedStream(Func<ValueTask>? cleanupProcedure = null)
         {
             using var listener = new TcpListener(IPAddress.Loopback, 0);
             listener.Start();
@@ -216,9 +277,10 @@ namespace Fluxzy.Tests.UnitTests.Core
             await connect;
 
             var disposeCount = 0;
-            var stream = new DisposeEventNotifierStream(source, () => {
+            var stream = new DisposeEventNotifierStream(source, async () => {
                 Interlocked.Increment(ref disposeCount);
-                return ValueTask.CompletedTask;
+                if (cleanupProcedure != null)
+                    await cleanupProcedure();
             });
 
             return (stream, peer, () => Volatile.Read(ref disposeCount));

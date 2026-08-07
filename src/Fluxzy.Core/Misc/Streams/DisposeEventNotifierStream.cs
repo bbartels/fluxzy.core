@@ -15,7 +15,7 @@ namespace Fluxzy.Misc.Streams
     {
         private readonly TcpClient _sourceClient;
         private readonly Func<ValueTask>? _cleanupProcedure;
-        private bool _fromAsyncDispose;
+        private readonly Lazy<Task> _disposeTask;
 
         private int _totalRead;
 
@@ -35,6 +35,7 @@ namespace Fluxzy.Misc.Streams
             InnerStream = sourceClient.GetStream();
             LocalEndPoint = (IPEndPoint) sourceClient.Client.LocalEndPoint;
             RemoteEndPoint = remoteEndPoint;
+            _disposeTask = new Lazy<Task>(DisposeCoreAsync, LazyThreadSafetyMode.ExecutionAndPublication);
         }
 
         public IPEndPoint RemoteEndPoint { get; }
@@ -131,10 +132,7 @@ namespace Fluxzy.Misc.Streams
         public override void Close()
         {
             Faulted = true;
-
-            if (!_fromAsyncDispose) {
-                _ = DisposeAsync();
-            }
+            _ = DisposeAsync();
         }
 
         protected override void Dispose(bool disposing)
@@ -143,10 +141,14 @@ namespace Fluxzy.Misc.Streams
             base.Dispose(disposing);
         }
 
-        public override async ValueTask DisposeAsync()
+        public override ValueTask DisposeAsync()
         {
-            _fromAsyncDispose = true;
             Faulted = true;
+            return new ValueTask(_disposeTask.Value);
+        }
+
+        private async Task DisposeCoreAsync()
+        {
             _sourceClient.Dispose();
 
             await InnerStream.DisposeAsync().ConfigureAwait(false);
