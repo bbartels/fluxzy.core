@@ -150,6 +150,29 @@ namespace Fluxzy.Tests.UnitTests.Core
         }
 
         [Fact]
+        public async Task CancellationAfterSuccessfulSslHandshakeDoesNotPublishConnection()
+        {
+            var opened = await OpenConnectedStream();
+            using var peer = opened.Peer;
+            using var cancellation = new CancellationTokenSource();
+            var builder = CreateBuilder((stream, _, _, token) => {
+                using var registration = token.Register(state => ((Stream) state!).Close(), stream);
+                cancellation.Cancel();
+                return Task.FromResult(new SslConnection(
+                    stream, CreateSslInfo(), SslApplicationProtocol.Http11));
+            });
+            var exchange = CreateExchange();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                builder.OpenConnectionToRemote(
+                    exchange, Resolution(), HttpProtocols, Setting(opened.Stream), null,
+                    cancellation.Token).AsTask());
+
+            Assert.Equal(1, opened.DisposeCount());
+            Assert.Null(exchange.Connection);
+        }
+
+        [Fact]
         public async Task ConnectionTimeoutPreservesMappingAndDisposesOpenedStream()
         {
             var opened = await OpenConnectedStream();

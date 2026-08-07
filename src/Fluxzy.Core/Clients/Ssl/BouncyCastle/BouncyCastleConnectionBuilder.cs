@@ -61,7 +61,7 @@ namespace Fluxzy.Clients.Ssl.BouncyCastle
 
             // BC's ConnectAsync does not take a token: closing the inner stream is the
             // only way to abort a pending handshake read.
-            using var tokenRegistration = token.Register(s => ((Stream) s!).Close(), innerStream);
+            var tokenRegistration = token.Register(s => ((Stream) s!).Close(), innerStream);
 
             try
             {
@@ -79,6 +79,14 @@ namespace Fluxzy.Clients.Ssl.BouncyCastle
                     innerException: ex,
                     networkErrorCode: networkErrorCode);
             }
+            finally
+            {
+                tokenRegistration.Dispose();
+            }
+
+            // Once the destructive registration is detached, cancellation either wins here
+            // or can no longer close a connection that is about to be published as successful.
+            token.ThrowIfCancellationRequested();
 
             var keyInfos =
                 Encoding.UTF8.GetString(memoryStream.ToArray());

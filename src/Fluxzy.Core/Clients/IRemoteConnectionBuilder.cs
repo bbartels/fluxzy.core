@@ -72,6 +72,7 @@ namespace Fluxzy.Clients
                         s => openedStream = s, connectToken)
                     .ConfigureAwait(false);
 
+                connectToken.ThrowIfCancellationRequested();
                 connectionOpened = true;
                 return result;
             }
