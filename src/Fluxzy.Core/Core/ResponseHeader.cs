@@ -60,7 +60,7 @@ namespace Fluxzy.Core
             return int.Parse(field.Value.Span);
         }
 
-        public int TimeoutIdleSeconds { get; set; } = 1;
+        public int TimeoutIdleSeconds { get; set; } = -1;
 
         public int MaxConnection { get; set; } = -1;
 
