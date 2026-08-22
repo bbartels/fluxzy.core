@@ -1,9 +1,18 @@
 // Copyright 2021 - Haga Rakotoharivelo - https://github.com/haga-rak
 
 using System;
+using System.Collections.Concurrent;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Threading.Tasks;
 using Fluxzy.Clients.H2.Encoder;
 using Fluxzy.Core;
+using Fluxzy.Rules.Actions;
+using Fluxzy.Tests._Fixtures;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Xunit;
 
 namespace Fluxzy.Tests.UnitTests.Core
@@ -149,14 +158,52 @@ namespace Fluxzy.Tests.UnitTests.Core
             Assert.Equal(-1, header.TimeoutIdleSeconds);
         }
 
-        private static ResponseHeader Parse(
-            string fields,
-            string protocol = "HTTP/1.1",
-            int statusCode = 200)
+        [Fact]
+        public async Task Requests_Over_One_Second_Apart_Reuse_Upstream_Tls_Connection()
         {
-            var rawHeader = $"{protocol} {statusCode} Test\r\n{fields}\r\n";
+            var connectionIds = new ConcurrentDictionary<string, byte>();
+            await using var origin = await InProcessHost.Create(app =>
+                app.MapGet("/", (HttpContext context) => {
+                    var connectionId = context.Connection.Id;
+                    connectionIds.TryAdd(connectionId, 0);
+                    context.Response.Headers["X-Connection-Id"] = connectionId;
+                    return Results.Text("ok");
+                }), suppressLogging: true, protocols: HttpProtocols.Http1);
 
-            return new ResponseHeader(rawHeader.AsMemory(), false, true);
+            var setting = FluxzySetting.CreateLocalRandomPort();
+            setting.ConfigureRule().WhenAny()
+                   .Do(new SkipRemoteCertificateValidationAction());
+
+            await using var proxy = new Proxy(setting);
+            using var client = HttpClientUtility.CreateHttpClient(proxy.Run(), setting,
+                handler => handler.ServerCertificateCustomValidationCallback =
+                    HttpClientHandler.DangerousAcceptAnyServerCertificateValidator);
+            client.DefaultRequestVersion = HttpVersion.Version11;
+            client.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionExact;
+
+            var url = $"https://localhost:{origin.Port}/";
+            var firstConnection = await GetConnectionId(client, url);
+
+            await Task.Delay(TimeSpan.FromMilliseconds(1250));
+
+            var secondConnection = await GetConnectionId(client, url);
+
+            Assert.Equal(firstConnection, secondConnection);
+            Assert.Single(connectionIds);
+        }
+
+        private static ResponseHeader Parse(
+            string fields, string protocol = "HTTP/1.1", int statusCode = 200) =>
+            new($"{protocol} {statusCode} OK\r\n{fields}\r\n".AsMemory(), true, true);
+
+        private static async Task<string> GetConnectionId(HttpClient client, string url)
+        {
+            using var response = await client.GetAsync(url);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("ok", await response.Content.ReadAsStringAsync());
+
+            return response.Headers.GetValues("X-Connection-Id").Single();
         }
     }
 }
