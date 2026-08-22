@@ -263,14 +263,11 @@ namespace Fluxzy.Clients.H11
                     var closeForConnectionAuth =
                         !_dedicated && ConnectionAuthHeuristic.InvolvesConnectionAuth(exchange);
 
-                    // The disposition task owns the active-request and pinned-lease cleanup.
-                    // Publish that ownership before starting it because exchange.Complete may
-                    // already be finished and the async method can run synchronously.
-                    activityHandedToContinuation = true;
-                    leaseHandedToContinuation = leaseAcquired;
                     exchange.RegisterConnectionDisposition(DisposeConnectionAfterExchange(
                         exchange, connection, maxConnection, closeForConnectionAuth,
                         abortRegistration, cancellationToken));
+                    activityHandedToContinuation = true;
+                    leaseHandedToContinuation = leaseAcquired;
                 }
                 catch (Exception ex) {
 
@@ -337,30 +334,38 @@ namespace Fluxzy.Clients.H11
 
         private async Task DisposeConnectionAfterExchange(
             Exchange exchange, Connection connection, int maxConnection,
-            bool closeForConnectionAuth, CancellationTokenRegistration abortRegistration,
+            bool closeForConnectionAuth,
+            CancellationTokenRegistration abortRegistration,
             CancellationToken cancellationToken)
         {
             var closeConnection = true;
             var completionSucceeded = false;
 
             try {
-                closeConnection = await exchange.Complete.ConfigureAwait(false);
-                completionSucceeded = true;
-            }
-            catch (Exception exception) {
-                exchange.Errors.Add(new Error("Error while reading response", exception));
-            }
+                try {
+                    closeConnection = await exchange.Complete.ConfigureAwait(false);
+                    completionSucceeded = true;
+                }
+                catch {
+                    if (exchange.Complete.Exception != null) {
+                        foreach (var exception in exchange.Complete.Exception.InnerExceptions) {
+                            exchange.Errors.Add(new Error("Error while reading response", exception));
+                        }
+                    }
+                }
 
-            try {
-                abortRegistration.Dispose();
+                try {
+                    abortRegistration.Dispose();
+                }
+                catch (Exception exception) {
+                    exchange.Errors.Add(new Error("Error while releasing response cancellation", exception));
+                    closeConnection = true;
+                }
 
-                if (cancellationToken.IsCancellationRequested)
+                if (cancellationToken.IsCancellationRequested || closeForConnectionAuth)
                     closeConnection = true;
 
                 if (maxConnection != -1 && maxConnection <= connection.RequestProcessed)
-                    closeConnection = true;
-
-                if (closeForConnectionAuth)
                     closeConnection = true;
 
                 if (exchange.Metrics.ResponseBodyEnd == default)
@@ -372,20 +377,21 @@ namespace Fluxzy.Clients.H11
                     return;
                 }
 
-                FreeConnectionStreams(connection);
-            }
-            catch (Exception exception) {
-                exchange.Errors.Add(new Error("Error while disposing remote connection", exception));
+                try {
+                    FreeConnectionStreams(connection);
+                }
+                catch (Exception exception) {
+                    exchange.Errors.Add(new Error("Error while disposing remote connection", exception));
+                }
             }
             finally {
-                // Send returns after response headers, so disposition owns pool activity and
-                // the pinned lease until the body is consumed and the connection is recycled
-                // or closed.
+                // The request remains active until its connection is reusable or closed.
                 lock (_idleGate) {
                     _activeRequestCount--;
                     _lastActivity = _timingProvider.Instant();
                 }
 
+                // A pinned sender can proceed only after disposition is complete.
                 _pinnedLease?.Release();
             }
         }
@@ -492,3 +498,4 @@ namespace Fluxzy.Clients.H11
         public DateTime LastUsed { get; set; }
     }
 }
+
