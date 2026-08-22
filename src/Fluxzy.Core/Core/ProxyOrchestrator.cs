@@ -833,6 +833,8 @@ namespace Fluxzy.Core
                         // Enhance your calm
                     }
 
+                    await exchange.ConnectionDisposition.ConfigureAwait(false);
+
                     FluxzyLogEvents.LogExchangeCompleted(_logger, exchange, _proxyRuntimeSetting.StartupSetting);
                 }
                 else
