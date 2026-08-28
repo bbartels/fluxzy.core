@@ -84,8 +84,6 @@ namespace Fluxzy.Clients
             }
             finally {
                 if (!connectionOpened) {
-                    exchange.Connection = null;
-
                     if (openedStream != null) {
                         try {
                             await openedStream.DisposeAsync().ConfigureAwait(false);

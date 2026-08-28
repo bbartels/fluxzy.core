@@ -26,7 +26,7 @@ namespace Fluxzy.Tests.UnitTests.Core
         };
 
         [Fact]
-        public async Task TlsFailureDisposesOpenedStreamAndClearsConnection()
+        public async Task TlsFailureDisposesOpenedStreamAndKeepsConnection()
         {
             var opened = await OpenConnectedStream();
             using var peer = opened.Peer;
@@ -41,11 +41,11 @@ namespace Fluxzy.Tests.UnitTests.Core
 
             Assert.Same(expected, actual);
             Assert.Equal(1, opened.DisposeCount());
-            Assert.Null(exchange.Connection);
+            Assert.NotNull(exchange.Connection);
         }
 
         [Fact]
-        public async Task UpstreamConnectFailureDisposesOpenedStreamAndClearsConnection()
+        public async Task UpstreamConnectFailureDisposesOpenedStreamAndKeepsConnection()
         {
             var opened = await OpenConnectedStream();
             using var peer = opened.Peer;
@@ -62,7 +62,7 @@ namespace Fluxzy.Tests.UnitTests.Core
 
             Assert.Contains("Failed to connect to upstream proxy", error.Message);
             Assert.Equal(1, opened.DisposeCount());
-            Assert.Null(exchange.Connection);
+            Assert.NotNull(exchange.Connection);
         }
 
         [Fact]
@@ -85,7 +85,7 @@ namespace Fluxzy.Tests.UnitTests.Core
 
             Assert.Same(expected, actual);
             Assert.Equal(1, opened.DisposeCount());
-            Assert.Null(exchange.Connection);
+            Assert.NotNull(exchange.Connection);
         }
 
         [Fact]
@@ -107,11 +107,11 @@ namespace Fluxzy.Tests.UnitTests.Core
 
             Assert.Equal(NetworkErrorCodes.ConnectionTimeout, error.ClientError.NetworkErrorCode);
             Assert.Equal(1, opened.DisposeCount());
-            Assert.Null(exchange.Connection);
+            Assert.NotNull(exchange.Connection);
         }
 
         [Fact]
-        public async Task FailureBeforeStreamCreationClearsConnectionWithoutDisposal()
+        public async Task FailureBeforeStreamCreationKeepsConnectionWithoutDisposal()
         {
             var expected = new SocketException((int) SocketError.ConnectionRefused);
             var provider = new TestTcpConnectionProvider(_ =>
@@ -127,7 +127,7 @@ namespace Fluxzy.Tests.UnitTests.Core
 
             Assert.Same(expected, actual);
             Assert.Equal(0, provider.StreamsReturned);
-            Assert.Null(exchange.Connection);
+            Assert.NotNull(exchange.Connection);
         }
 
         [Theory]
