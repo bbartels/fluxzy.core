@@ -57,6 +57,13 @@ namespace Fluxzy.Clients.H11
 
             exchange.Metrics.RequestHeaderSending = ITimingProvider.Default.Instant();
 
+            // A body of unknown length (e.g. an HTTP/2 request without content-length)
+            // must be delimited with chunked transfer coding on HTTP/1.1, otherwise the
+            // origin reads a bodyless request followed by garbage (RFC 9112 §6.3).
+            if (exchange.Request.Header.ContentLength < 0 && HasRequestBody(exchange.Request.Body)) {
+                exchange.Request.Header.ForceTransferChunked();
+            }
+
             var headerLength = exchange.Request.Header.WriteHttp11(
                 !exchange.Authority.Secure,
                 buffer, skipNonForwardableHeader: true, writeExtraHeaderField: true, requestClose: false);
@@ -430,6 +437,11 @@ namespace Fluxzy.Clients.H11
                 .GetStatusLine(statusCode.ToString().AsMemory());
 
             await writer(statusCode, reasonPhrase, cancellationToken).ConfigureAwait(false);
+        }
+
+        private static bool HasRequestBody(Stream? body)
+        {
+            return body != null && (!body.CanSeek || body.Length > 0);
         }
     }
 }

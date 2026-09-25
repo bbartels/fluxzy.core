@@ -48,6 +48,13 @@ namespace Fluxzy.Clients.H2.Encoder
             var reader = new Http11HeaderReader(headerContent, isHttps);
 
             while (reader.MoveNext()) {
+                // HTTP/2 frames bodies with DATA and END_STREAM; transfer-encoding is
+                // connection-specific and makes the message malformed (RFC 9113 §8.2.2).
+                if (reader.Current.Name.Span.Equals(
+                        Http11Constants.TransferEncodingVerb.Span, StringComparison.OrdinalIgnoreCase)) {
+                    continue;
+                }
+
                 offset += Encode(reader.Current, buffer.Slice(offset));
             }
 

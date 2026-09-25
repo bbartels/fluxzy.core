@@ -55,7 +55,7 @@ considered a public contract and will not change without a major version bump.
 
 | Token            | Description                                                                                                                 |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `protocol_error` | An HTTP/2 stream protocol error happened before the response header was received.                                           |
+| `protocol_error` | An HTTP/2 stream protocol error happened before the response header was received, or a request could not be forwarded over HTTP/2 because it used a transfer coding other than recognised `chunked` framing (for example `Transfer-Encoding: gzip, chunked`). |
 | `rule_failure`   | A user-supplied Fluxzy rule (filter or action) threw during exchange processing. See the body for the rule diagnostic.      |
 | `unknown`        | Fallback when none of the categories above match. Typically a wrapped exception that did not carry enough information.      |
 

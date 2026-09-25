@@ -278,6 +278,17 @@ namespace Fluxzy.Clients.H2
             Exchange exchange, IDownStreamPipe _, RsBuffer buffer, ExchangeScope __,
             CancellationToken cancellationToken = default)
         {
+            // HTTP/2 has no transfer codings and the encoder drops transfer-encoding. Any
+            // coding besides recognised chunked framing (e.g. "gzip, chunked") would reach the
+            // origin unannounced or with an unread body, so refuse the request instead of
+            // corrupting it. Checked before the pool-level failure handling below: this
+            // rejects one request, not the shared connection.
+            if (HasTransferCodingHttp2CannotCarry(exchange.Request.Header)) {
+                throw new ClientErrorException(1,
+                    "Request transfer coding cannot be forwarded over HTTP/2",
+                    networkErrorCode: NetworkErrorCodes.ProtocolError);
+            }
+
             Interlocked.Increment(ref TotalRequest);
 
             try {
@@ -306,6 +317,56 @@ namespace Fluxzy.Clients.H2
 
                 throw;
             }
+        }
+
+        private static bool HasTransferCodingHttp2CannotCarry(RequestHeader header)
+        {
+            // Dropping transfer-encoding is only lossless when, across all its fields, it names
+            // exactly one chunked coding and that framing was recognised and removed.
+            var hasTransferEncoding = false;
+            var chunkedCodings = 0;
+
+            foreach (var field in header.HeaderFields) {
+                if (!field.Name.Span.Equals(Http11Constants.TransferEncodingVerb.Span, StringComparison.OrdinalIgnoreCase)) {
+                    continue;
+                }
+
+                var fieldChunkedCodings = CountChunkedCodings(field.Value.Span);
+
+                if (fieldChunkedCodings < 0) {
+                    return true;
+                }
+
+                hasTransferEncoding = true;
+                chunkedCodings += fieldChunkedCodings;
+            }
+
+            return hasTransferEncoding && (chunkedCodings != 1 || !header.ChunkedBody);
+        }
+
+        /// <summary>
+        ///     Number of chunked codings in a transfer-coding list, or -1 when it holds any other coding.
+        /// </summary>
+        private static int CountChunkedCodings(ReadOnlySpan<char> transferCodings)
+        {
+            var count = 0;
+
+            while (!transferCodings.IsEmpty) {
+                var comma = transferCodings.IndexOf(',');
+                var coding = (comma < 0 ? transferCodings : transferCodings.Slice(0, comma)).Trim();
+
+                if (coding.Length > 0 && !coding.Equals("chunked", StringComparison.OrdinalIgnoreCase)) {
+                    return -1;
+                }
+
+                if (coding.Length > 0) {
+                    count++;
+                }
+
+                transferCodings = comma < 0 ? ReadOnlySpan<char>.Empty : transferCodings.Slice(comma + 1);
+            }
+
+            return count;
         }
 
         public Authority Authority { get; }
